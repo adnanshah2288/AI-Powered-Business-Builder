@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#fafaf9">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI Business Builder</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,281 +10,139 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <!-- ========================================================
-       AUTH SCREEN
-       ======================================================== -->
-  <section id="auth-view" class="view" hidden>
-    <div class="auth-shell">
-      <aside class="auth-aside">
-        <div class="logo"><span class="logo-mark" aria-hidden="true"></span><span>AI Business Builder</span></div>
-        <div class="auth-pitch">
-          <h1 class="auth-title">Turn what you know into a business.</h1>
-          <p class="lede">Describe your skills, budget and market. Get opportunities, a plan and the numbers behind it, kept private to your account.</p>
-        </div>
-        <p class="fine">AI-generated estimates. Verify before acting.</p>
-      </aside>
+  <!-- Top bar: hidden on the sign-in screen -->
+  <header class="topbar" id="topbar" hidden>
+    <button class="brand" data-go="dashboard">AI Business Builder</button>
+    <div class="account">
+      <span id="user-email" class="muted"></span>
+      <button class="btn btn-ghost" id="sign-out">Sign out</button>
+    </div>
+  </header>
 
-      <div class="auth-main">
-        <div class="auth-card">
-          <h2 class="auth-heading" id="auth-heading">Welcome back</h2>
-          <p class="lede" id="auth-sub">Sign in to continue to your projects.</p>
-
-          <div class="tabs" role="tablist" aria-label="Account">
-            <button type="button" class="tab is-active" data-mode="login" role="tab" aria-selected="true">Sign in</button>
-            <button type="button" class="tab" data-mode="register" role="tab" aria-selected="false">Create account</button>
-          </div>
-
-          <form id="auth-form" novalidate>
-            <label>Email
-              <input name="email" type="email" required autocomplete="email" placeholder="you@example.com">
-            </label>
-            <label>Password
-              <span class="pw">
-                <input name="password" type="password" required minlength="8" maxlength="72" autocomplete="current-password" placeholder="Your password">
-                <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password">Show</button>
-              </span>
-            </label>
-            <p class="hint" id="auth-hint">At least 8 characters.</p>
-            <button type="submit" class="btn btn-primary btn-block" id="auth-submit">Sign in</button>
-          </form>
-          <p class="message" id="auth-message" role="status"></p>
-        </div>
+  <!-- SIGN IN -->
+  <section class="auth" data-view="auth" hidden>
+    <div class="auth-box">
+      <p class="eyebrow">AI Business Builder</p>
+      <h1>Turn an idea into a business.</h1>
+      <p class="lede">Sign in to keep every project private to your account.</p>
+      <div class="seg" role="tablist">
+        <button class="seg-btn is-on" data-mode="login">Sign in</button>
+        <button class="seg-btn" data-mode="register">Create account</button>
       </div>
+      <form id="auth-form" class="stack">
+        <label>Email <input name="email" type="email" required autocomplete="email"></label>
+        <label>Password <input name="password" type="password" required minlength="8" maxlength="72" autocomplete="current-password"></label>
+        <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Sign in</button>
+      </form>
+      <p class="msg" id="auth-msg" role="alert"></p>
     </div>
   </section>
 
-  <!-- ========================================================
-       APP SHELL
-       ======================================================== -->
-  <div id="app-view" class="view" hidden>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <button type="button" class="brand" data-go="dashboard">
-          <span class="logo-mark" aria-hidden="true"></span>
-          <span>AI Business Builder</span>
-        </button>
-        <div class="topbar-right">
-          <span class="avatar" id="user-avatar" aria-hidden="true"></span>
-          <span class="user-email" id="user-email"></span>
-          <button type="button" class="btn btn-quiet btn-sm" id="sign-out">Sign out</button>
-        </div>
+  <!-- DASHBOARD -->
+  <section class="page" data-view="dashboard" hidden>
+    <div class="page-head">
+      <div>
+        <h2>Your projects</h2>
+        <p class="lede">Each project keeps its profile, opportunities and analysis.</p>
       </div>
-    </header>
+      <button class="btn btn-primary" data-go="builder">New business</button>
+    </div>
+    <div id="projects" class="list" hidden></div>
+    <div id="empty" class="empty" hidden>
+      <h3>Start with one idea.</h3>
+      <p>Tell us what you know, what you want to build, and what resources you have.</p>
+      <button class="btn btn-primary" data-go="builder">Create business</button>
+    </div>
+  </section>
 
-    <main class="page" id="main">
-
-      <!-- DASHBOARD -->
-      <section id="page-dashboard" class="page-section" hidden>
-        <div class="page-head">
-          <div>
-            <p class="eyebrow">Workspace</p>
-            <h2 tabindex="-1">Your projects</h2>
-            <p class="lede">Each project keeps its profile, opportunities and analysis.</p>
-          </div>
-          <button type="button" class="btn btn-primary" data-go="builder">New project</button>
+  <!-- BUILDER -->
+  <section class="page narrow" data-view="builder" hidden>
+    <p class="eyebrow">New project</p>
+    <h2 class="display">What do you want to build?</h2>
+    <p class="lede">Describe what you know and what you have. The assistant proposes opportunities based on this.</p>
+    <form id="builder-form" class="builder">
+      <label class="wide">Project name <input name="name" required maxlength="200" placeholder="For example, Weekend bakery"></label>
+      <label class="wide">Skills <textarea name="skills" required minlength="2" maxlength="4000" placeholder="Bookkeeping, Excel, customer support"></textarea></label>
+      <label class="wide">Interests <textarea name="interests" maxlength="4000" placeholder="Food, travel, fitness"></textarea></label>
+      <label>Budget <input name="budget" type="number" min="0" step="any" required value="500"></label>
+      <label>Currency <input name="currency" required minlength="3" maxlength="3" value="PKR"></label>
+      <label>Country <input name="country" required value="Pakistan"></label>
+      <label>City <input name="city" maxlength="100" placeholder="Optional"></label>
+      <label>Industry <input name="industry" maxlength="200" placeholder="Any"></label>
+      <label>Desired monthly income <input name="desired_income" type="number" min="0" step="any" value="0"></label>
+      <fieldset class="wide segfield">
+        <legend>Setting</legend>
+        <div class="seg">
+          <label><input type="radio" name="online_or_offline" value="either" checked><span>Either</span></label>
+          <label><input type="radio" name="online_or_offline" value="online"><span>Online</span></label>
+          <label><input type="radio" name="online_or_offline" value="offline"><span>Offline</span></label>
         </div>
-        <div id="project-list" class="projects"></div>
-        <div class="empty-state" id="project-empty" hidden>
-          <h3>Turn an idea into a business.</h3>
-          <p>Tell us what you know, what you want to build, and what resources you have.</p>
-          <button type="button" class="btn btn-primary" data-go="builder">Create business</button>
-        </div>
-      </section>
-
-      <!-- BUILDER -->
-      <section id="page-builder" class="page-section" hidden>
-        <div class="page-head">
-          <div>
-            <p class="eyebrow">New project</p>
-            <h2 tabindex="-1">What can you build?</h2>
-            <p class="lede">Describe yourself and your market. The AI proposes opportunities based on this.</p>
-          </div>
-        </div>
-
-        <form id="profile-form" class="builder">
-
-          <div class="fsec">
-            <div class="fsec-intro">
-              <h3>The idea</h3>
-              <p>Give this project a name you will recognise later.</p>
-            </div>
-            <div class="fields">
-              <label class="span-2">Project name
-                <input name="name" required maxlength="200" placeholder="For example, Weekend bakery">
-              </label>
-            </div>
-          </div>
-
-          <div class="fsec">
-            <div class="fsec-intro">
-              <h3>About you</h3>
-              <p>What you are good at and what you enjoy. The more specific, the better the ideas.</p>
-            </div>
-            <div class="fields">
-              <label class="span-2">Skills
-                <textarea name="skills" required minlength="2" maxlength="4000" placeholder="Bookkeeping, Excel, customer support"></textarea>
-              </label>
-              <label class="span-2">Interests
-                <textarea name="interests" maxlength="4000" placeholder="Food, travel, fitness"></textarea>
-              </label>
-            </div>
-          </div>
-
-          <div class="fsec">
-            <div class="fsec-intro">
-              <h3>Resources and place</h3>
-              <p>Your starting budget and where you will operate.</p>
-            </div>
-            <div class="fields">
-              <label>Budget
-                <input name="budget" type="number" min="0" step="any" required value="500" inputmode="decimal">
-              </label>
-              <label>Currency
-                <input name="currency" required minlength="3" maxlength="3" value="PKR" class="upper">
-              </label>
-              <label>Country
-                <input name="country" required value="Pakistan">
-              </label>
-              <label>City
-                <input name="city" maxlength="100" placeholder="Optional">
-              </label>
-            </div>
-          </div>
-
-          <div class="fsec">
-            <div class="fsec-intro">
-              <h3>Direction</h3>
-              <p>Where you want this to go. Everything here is optional.</p>
-            </div>
-            <div class="fields">
-              <label>Industry
-                <input name="industry" maxlength="200" placeholder="Any">
-              </label>
-              <label>Desired monthly income
-                <input name="desired_income" type="number" min="0" step="any" value="0" inputmode="decimal">
-              </label>
-              <label class="span-2">Goals
-                <textarea name="goals" maxlength="4000" placeholder="Part-time income, a company in five years"></textarea>
-              </label>
-              <div class="span-2 group">
-                <span class="group-label" id="setting-label">Setting</span>
-                <div class="seg" role="radiogroup" aria-labelledby="setting-label">
-                  <label><input type="radio" name="online_or_offline" value="either" checked><span>Either</span></label>
-                  <label><input type="radio" name="online_or_offline" value="online"><span>Online</span></label>
-                  <label><input type="radio" name="online_or_offline" value="offline"><span>Offline</span></label>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-actions">
-            <button type="button" class="btn btn-quiet" data-go="dashboard">Cancel</button>
-            <button type="submit" class="btn btn-primary" id="create-btn">Create project</button>
-          </div>
-          <p class="message" id="builder-message" role="status"></p>
-        </form>
-      </section>
-
-      <!-- PROJECT -->
-      <section id="page-project" class="page-section" hidden>
-        <div class="page-head">
-          <div>
-            <p class="eyebrow">Project</p>
-            <h2 id="project-title" tabindex="-1"></h2>
-            <p class="lede" id="project-meta"></p>
-          </div>
-          <button type="button" class="btn btn-quiet btn-sm btn-danger" id="delete-project">Delete project</button>
-        </div>
-
-        <dl class="summary" id="project-stats"></dl>
-
-        <div class="rail" id="analysis-steps">
-          <div class="rail-group">
-            <p class="rail-caption">Research</p>
-            <div class="steps">
-              <button type="button" class="step" data-run="opportunities"><span class="n">1</span><span class="l">Opportunities</span></button>
-              <button type="button" class="step" data-run="market"><span class="n">2</span><span class="l">Market</span></button>
-              <button type="button" class="step" data-run="pain_points"><span class="n">3</span><span class="l">Pain points</span></button>
-              <button type="button" class="step" data-run="gaps"><span class="n">4</span><span class="l">Gaps</span></button>
-            </div>
-          </div>
-          <div class="rail-group">
-            <p class="rail-caption">Build <span>Choose an opportunity first</span></p>
-            <div class="steps">
-              <button type="button" class="step" data-run="plan"><span class="n">5</span><span class="l">Business plan</span></button>
-              <button type="button" class="step" data-run="financials"><span class="n">6</span><span class="l">Financials</span></button>
-              <button type="button" class="step" data-run="globalization"><span class="n">7</span><span class="l">Globalization</span></button>
-              <button type="button" class="step" data-run="execution"><span class="n">8</span><span class="l">Execution</span></button>
-            </div>
-          </div>
-        </div>
-        <p class="message" id="run-message" role="status"></p>
-
-        <div id="run-panel" class="run" hidden aria-live="polite">
-          <div class="orb" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div>
-            <h3 id="run-title">Working</h3>
-            <ol id="run-steps" class="gen-steps"></ol>
-          </div>
-        </div>
-
-        <div id="result-area" class="result-area"></div>
-
-        <div class="chat-block">
-          <h3 class="sub">Ask about this project</h3>
-          <div class="chat">
-            <div id="chat-empty" class="chat-empty" hidden>
-              <p>Ask anything about this project. For example:</p>
-              <div class="suggests">
-                <button type="button" class="suggest" data-text="What is the first thing to test?">What is the first thing to test?</button>
-                <button type="button" class="suggest" data-text="What could go wrong in the first three months?">What could go wrong early?</button>
-                <button type="button" class="suggest" data-text="How do I find my first customers?">How do I find first customers?</button>
-              </div>
-            </div>
-            <div id="chat-log" class="chat-log" aria-live="polite"></div>
-            <form id="chat-form" class="chat-form">
-              <input name="message" required maxlength="4000" placeholder="Ask a question about this project" autocomplete="off">
-              <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
-            </form>
-          </div>
-        </div>
-      </section>
-
-      <!-- OPPORTUNITY DETAIL -->
-      <section id="page-opportunity" class="page-section" hidden>
-        <div class="page-head">
-          <div>
-            <button type="button" class="back" data-back="project">
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M16 10H5m0 0 4.5-4.5M5 10l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Back to project
-            </button>
-            <h2 id="opp-title" tabindex="-1"></h2>
-            <p class="lede" id="opp-concept"></p>
-          </div>
-        </div>
-        <div id="opp-detail" class="detail"></div>
-        <div class="form-actions">
-          <button type="button" class="btn btn-primary" id="opp-use">Use this opportunity for the analysis</button>
-        </div>
-      </section>
-
-    </main>
-  </div>
-
-  <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
-    <form method="dialog">
-      <h3 id="confirm-title">Delete this project?</h3>
-      <p id="confirm-text">This cannot be undone.</p>
-      <div class="dialog-actions">
-        <button class="btn btn-quiet" value="no">Cancel</button>
-        <button class="btn btn-danger-solid" value="yes">Delete</button>
+      </fieldset>
+      <label class="wide">Goals <textarea name="goals" maxlength="4000" placeholder="Part-time income, a company in five years"></textarea></label>
+      <div class="actions wide">
+        <button type="button" class="btn btn-ghost" data-go="dashboard">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="create-btn">Generate opportunities</button>
       </div>
+      <p class="msg wide" id="builder-msg" role="alert"></p>
     </form>
-  </dialog>
+  </section>
 
-  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <!-- AI GENERATION STATE -->
+  <section class="page narrow generating" data-view="generating" hidden>
+    <p class="eyebrow">Working</p>
+    <h2 class="display">Building your opportunities</h2>
+    <ol id="gen-steps" class="gen-steps">
+      <li>Analyzing your market</li>
+      <li>Finding opportunities</li>
+      <li>Evaluating demand</li>
+      <li>Shaping your business plan</li>
+    </ol>
+    <p class="muted small">This usually takes under a minute.</p>
+  </section>
+
+  <!-- PROJECT -->
+  <section class="page" data-view="project" hidden>
+    <div class="page-head">
+      <div>
+        <h2 id="p-title"></h2>
+        <p class="lede" id="p-meta"></p>
+      </div>
+      <button class="btn btn-ghost btn-danger" id="delete-project">Delete</button>
+    </div>
+    <nav class="steps" id="steps" aria-label="Analysis steps">
+      <button class="step" data-run="opportunities">Opportunities</button>
+      <button class="step" data-run="market">Market</button>
+      <button class="step" data-run="pain_points">Pain points</button>
+      <button class="step" data-run="gaps">Gaps</button>
+      <button class="step" data-run="plan">Business plan</button>
+      <button class="step" data-run="financials">Financials</button>
+      <button class="step" data-run="globalization">Globalization</button>
+      <button class="step" data-run="execution">Execution</button>
+    </nav>
+    <div id="result" class="report"></div>
+
+    <div class="chat">
+      <h3>Ask about this project</h3>
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form" class="chat-form">
+        <input name="message" required maxlength="4000" placeholder="For example, what should I test first?" aria-label="Your question">
+        <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- OPPORTUNITY DETAIL -->
+  <section class="page narrow" data-view="opportunity" hidden>
+    <button class="back" data-back="project">← Back to project</button>
+    <h2 class="display" id="opp-title"></h2>
+    <p class="lede" id="opp-concept"></p>
+    <div id="opp-body" class="report"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="opp-use">Use for analysis</button>
+    </div>
+  </section>
 
   <script src="app.js"></script>
 </body>
