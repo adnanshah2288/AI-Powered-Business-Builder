@@ -14,7 +14,7 @@ import os
 import secrets
 import time
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, get_args, get_origin
 
 import bcrypt
 from dotenv import load_dotenv
@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ValidationError
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -235,18 +235,24 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
 # GROQ PROVIDER
 # ============================================================
 # PURPOSE: The only place that talks to Groq. Every agent calls ask_json().
-# PROCESS: send system and user text through LangChain, pull out the JSON object,
-#          and validate it with the Pydantic model passed in.
+# PROCESS: ask Groq for a JSON object (JSON mode), then pull out the object.
 # FAILURE CASES:
 # - key missing -> AI_UNAVAILABLE (details only in the server log)
 # - Groq or network error -> LLM_ERROR
-# - reply not valid JSON or wrong shape -> retried once, then LLM_ERROR
+# - reply still invalid after two attempts -> LLM_ERROR, with the exact reason in the log
 
 def _groq_call(system_prompt: str, user_prompt: str) -> str:
     if not GROQ_API_KEY:
         log.error("GROQ_API_KEY is not set")
         raise AppError("AI_UNAVAILABLE", "The AI service is not available right now.")
-    llm = ChatGroq(api_key=GROQ_API_KEY, model=GROQ_MODEL, temperature=0.5, timeout=60, max_retries=1)
+    llm = ChatGroq(
+        api_key=GROQ_API_KEY,
+        model=GROQ_MODEL,
+        temperature=0.4,
+        timeout=60,
+        max_retries=1,
+        model_kwargs={"response_format": {"type": "json_object"}},  # Groq JSON mode
+    )
     try:
         reply = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
         return reply.content
@@ -255,17 +261,72 @@ def _groq_call(system_prompt: str, user_prompt: str) -> str:
         raise AppError("LLM_ERROR", "The AI service could not complete the request.")
 
 
+# ============================================================
+# TOLERANT NORMALISATION
+# ============================================================
+# PURPOSE: AI replies are often almost right: a list where a sentence was asked for,
+#          a number instead of text, a missing optional line. These helpers repair
+#          those small differences before validation, so the user gets a result.
+# PROCESS: walk the schema's fields and convert each value to the expected type.
+# FAILURE CASES: a required field that is completely absent becomes an empty string,
+#                and the log records it.
+
+def _to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "; ".join(_to_text(v) for v in value)
+    if isinstance(value, dict):
+        return "; ".join(f"{k}: {_to_text(v)}" for k, v in value.items())
+    return str(value)
+
+
+def normalize(data: dict, schema: type) -> dict:
+    out = {}
+    for name, field in schema.model_fields.items():
+        if name not in data:
+            if field.is_required() and field.annotation is str:
+                log.warning("AI reply missing required text field '%s'; using empty text", name)
+                out[name] = ""
+            continue
+        value, annotation = data[name], field.annotation
+        if annotation is str:
+            out[name] = _to_text(value)
+        elif get_origin(annotation) is list:
+            inner = get_args(annotation)[0]
+            items = [] if value is None else (value if isinstance(value, list) else [value])
+            if isinstance(inner, type) and issubclass(inner, BaseModel):
+                out[name] = [normalize(v, inner) if isinstance(v, dict) else {"name": _to_text(v)} for v in items]
+            elif inner is str:
+                out[name] = [_to_text(v) for v in items]
+            else:
+                out[name] = items  # List[dict]: keep the objects as the AI wrote them
+        else:
+            out[name] = value
+    return out
+
+
 def ask_json(system_prompt: str, user_prompt: str, schema: type):
-    """Ask the model for JSON, validate it against `schema`, retry once if invalid."""
-    for attempt in range(2):
+    """Ask for JSON, repair small differences, validate, and retry once if still invalid."""
+    last_reason = "unknown"
+    for attempt in range(1, 3):
         raw = _groq_call(system_prompt, user_prompt)
         start, end = raw.find("{"), raw.rfind("}")
-        try:
-            if start == -1 or end == -1:
-                raise ValueError("no JSON object in reply")
-            return schema(**json.loads(raw[start:end + 1]))
-        except ValueError:  # covers JSON errors and Pydantic ValidationError
-            log.warning("Invalid AI output on attempt %s", attempt + 1)
+        if start == -1 or end == -1:
+            last_reason = "reply contained no JSON object"
+        else:
+            try:
+                data = json.loads(raw[start:end + 1])
+                return schema(**normalize(data, schema))
+            except json.JSONDecodeError as exc:
+                last_reason = f"invalid JSON: {exc}"
+            except ValidationError as exc:
+                last_reason = "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
+                )
+        log.warning("AI output rejected on attempt %s for %s: %s", attempt, schema.__name__, last_reason)
+        log.warning("Start of rejected reply: %s", raw[:300].replace("\n", " "))
+    log.error("Giving up on %s. Last reason: %s", schema.__name__, last_reason)
     raise AppError("LLM_ERROR", "The AI response did not match the expected structure.")
 
 
@@ -389,7 +450,8 @@ required_technology (list), risks (list), advantages (list), estimated_startup_c
 estimated_monthly_cost, implementation_difficulty ("low", "medium" or "high"),
 assumptions (list). Describe facts and assumptions. Do not rank opportunities.
 Use the user's currency for money and label every estimate as an estimate.
-Include specific, concrete detail. No text outside the JSON."""
+Include specific, concrete detail. Every text field must be a plain string.
+Every list field must be a JSON array of strings. No text outside the JSON."""
 
 
 def run_opportunity_agent(profile: BusinessProfile) -> OpportunityList:
@@ -403,10 +465,10 @@ def run_opportunity_agent(profile: BusinessProfile) -> OpportunityList:
 # OUTPUT: MarketResult
 
 MARKET_PROMPT = """You are a market analyst. Return ONLY a JSON object with keys:
-market_summary, market_characteristics, customer_needs, existing_solutions,
+market_summary (plain string), market_characteristics, customer_needs, existing_solutions,
 major_competitors, market_problems, opportunities, business_constraints, assumptions.
-Lists contain strings. Label anything that is not verified as an assumption.
-No text outside the JSON."""
+All keys except market_summary must be JSON arrays of plain strings.
+Label anything that is not verified as an assumption. No text outside the JSON."""
 
 
 def run_market_agent(profile: BusinessProfile, opportunity: Optional[dict]) -> MarketResult:
@@ -421,9 +483,9 @@ def run_market_agent(profile: BusinessProfile, opportunity: Optional[dict]) -> M
 # OUTPUT: PainPointsResult
 
 PAIN_PROMPT = """You are a customer research analyst. Return ONLY a JSON object with keys:
-pain_points (list of objects with problem, frustration, who_feels_it, severity),
-unmet_needs, inefficient_processes, expensive_solutions, underserved_users,
-potential_demand. Use plain strings. No text outside the JSON."""
+pain_points (JSON array of objects with problem, frustration, who_feels_it, severity),
+unmet_needs, inefficient_processes, expensive_solutions, underserved_users (all JSON arrays of
+plain strings), potential_demand (plain string). No text outside the JSON."""
 
 
 def run_pain_agent(profile: BusinessProfile, opportunity: Optional[dict]) -> PainPointsResult:
@@ -441,7 +503,7 @@ def run_pain_agent(profile: BusinessProfile, opportunity: Optional[dict]) -> Pai
 GAP_PROMPT = """You are a market gap analyst. Return ONLY a JSON object with keys:
 missing_features, underserved_markets, pricing_gaps, accessibility_gaps, geographic_gaps,
 workflow_problems, technology_opportunities, service_quality_gaps, assumptions.
-Lists contain strings. No text outside the JSON."""
+All keys must be JSON arrays of plain strings. No text outside the JSON."""
 
 
 def run_gap_agent(profile: BusinessProfile, context: dict) -> GapResult:
@@ -457,9 +519,9 @@ def run_gap_agent(profile: BusinessProfile, context: dict) -> GapResult:
 
 PLAN_PROMPT = """You are a business plan writer. Return ONLY a JSON object with keys:
 executive_summary, problem, solution, target_market, customer_profile, product_or_service,
-business_model, revenue_model, marketing_approach, sales_approach, operations,
-technology_requirements (list), estimated_costs (list), possible_revenue_sources (list),
-risks (list), milestones (list), launch_plan, growth_possibilities (list).
+business_model, revenue_model, marketing_approach, sales_approach, operations, launch_plan
+(all plain strings), and technology_requirements, estimated_costs, possible_revenue_sources,
+risks, milestones, growth_possibilities (all JSON arrays of plain strings).
 Label every estimate as an estimate. No text outside the JSON."""
 
 
@@ -475,10 +537,11 @@ def run_plan_agent(profile: BusinessProfile, opportunity: dict) -> PlanResult:
 # OUTPUT: FinancialResult. Figures are always labelled as estimates.
 
 FINANCIAL_PROMPT = """You are a financial analyst for early-stage businesses. Return ONLY a JSON
-object with keys: currency, startup_costs (list of {item, estimate}), monthly_operating_costs
-(list of {item, estimate}), pricing, revenue_assumptions (list), estimated_margin,
-break_even_assumption, scenarios (list of {name, description, monthly_revenue_estimate}),
-disclaimer. Use the user's currency. Every figure is an estimate. No text outside the JSON."""
+object with keys: currency, pricing, estimated_margin, break_even_assumption (plain strings),
+startup_costs and monthly_operating_costs (arrays of {item, estimate} with plain strings),
+revenue_assumptions (array of plain strings), scenarios (array of {name, description,
+monthly_revenue_estimate} with plain strings), disclaimer. Use the user's currency.
+Every figure is an estimate. No text outside the JSON."""
 
 
 def run_financial_agent(profile: BusinessProfile, opportunity: dict) -> FinancialResult:
@@ -493,10 +556,10 @@ def run_financial_agent(profile: BusinessProfile, opportunity: dict) -> Financia
 # OUTPUT: GlobalizationResult
 
 GLOBAL_PROMPT = """You are an international business analyst. Return ONLY a JSON object with keys:
-target_countries, currency_considerations, localization_needs, customer_differences,
-language_considerations, regulatory_considerations (general only, not legal advice),
-operational_complexity, scalability, international_opportunities, assumptions.
-Lists contain strings. No text outside the JSON."""
+operational_complexity, scalability (plain strings), and target_countries, currency_considerations,
+localization_needs, customer_differences, language_considerations, regulatory_considerations
+(general only, not legal advice), international_opportunities, assumptions (JSON arrays of plain
+strings). No text outside the JSON."""
 
 
 def run_global_agent(profile: BusinessProfile, opportunity: dict) -> GlobalizationResult:
@@ -511,9 +574,9 @@ def run_global_agent(profile: BusinessProfile, opportunity: dict) -> Globalizati
 # OUTPUT: ExecutionResult
 
 EXECUTION_PROMPT = """You are an execution planner. Return ONLY a JSON object with the key
-"phases": a list of objects, each with name, objectives (list), tasks (list), expected_output,
-dependencies (list), risks (list). Use these phases in order: Validation, MVP,
-First Customers, Improvement, Scale. No text outside the JSON."""
+"phases": a JSON array of objects, each with name and expected_output (plain strings), and
+objectives, tasks, dependencies, risks (JSON arrays of plain strings). Use these phases in order:
+Validation, MVP, First Customers, Improvement, Scale. No text outside the JSON."""
 
 
 def run_execution_agent(profile: BusinessProfile, opportunity: dict) -> ExecutionResult:
@@ -530,7 +593,8 @@ def run_execution_agent(profile: BusinessProfile, opportunity: dict) -> Executio
 
 CHAT_PROMPT = """You are a business advisor helping the user with one project.
 Use the project profile and saved analysis below. Say clearly when something is an estimate or
-an assumption. Keep answers specific and practical. Return ONLY a JSON object with key "reply"."""
+an assumption. Keep answers specific and practical. Return ONLY a JSON object with key "reply"
+whose value is a plain string."""
 
 
 def run_chat_agent(project: dict, history: list, message: str) -> ChatResult:
